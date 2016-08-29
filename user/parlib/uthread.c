@@ -235,6 +235,18 @@ void __attribute__((constructor)) uthread_lib_init(void)
 	register_ev_handler(EV_EVENT, handle_ev_ev, 0);
 }
 
+static bool cur_uth_is_sw_ctx(void)
+{
+	struct preempt_data *vcpd;
+
+	if (current_uthread->flags & UTHREAD_SAVED) {
+		return current_uthread->u_ctx.type == ROS_SW_CTX;
+	} else {
+		vcpd = vcpd_of(vcore_id());
+		return vcpd->uthread_ctx.type == ROS_SW_CTX;
+	}
+}
+
 /* 2LSs shouldn't call uthread_vcore_entry directly */
 void __attribute__((noreturn)) uthread_vcore_entry(void)
 {
@@ -243,6 +255,13 @@ void __attribute__((noreturn)) uthread_vcore_entry(void)
 	/* Should always have notifications disabled when coming in here. */
 	assert(!notif_is_enabled(vcoreid));
 	assert(in_vcore_context());
+
+	// XXX
+	if (current_uthread && !cur_uth_is_sw_ctx()) {
+		save_fp_state(&current_uthread->as);
+		current_uthread->flags |= UTHREAD_FPSAVED;
+	}
+
 	/* If someone is stealing our uthread (from when we were preempted before),
 	 * we can't touch our uthread.  But we might be the last vcore around, so
 	 * we'll handle preemption events (spammed to our public mbox).
@@ -640,7 +659,12 @@ void __attribute__((noreturn)) run_current_uthread(void)
 	assert(current_uthread->state == UT_RUNNING);
 	/* Uth was already running, should not have been saved */
 	assert(!(current_uthread->flags & UTHREAD_SAVED));
-	assert(!(current_uthread->flags & UTHREAD_FPSAVED));
+
+	// XXX can only do this based on the CTX type now. 
+	//assert(!(current_uthread->flags & UTHREAD_FPSAVED));
+	if (current_uthread->u_ctx.type != ROS_SW_CTX)
+		assert(current_uthread->flags & UTHREAD_FPSAVED);
+
 	printd("[U] Vcore %d is restarting uthread %08p\n", vcoreid,
 	       current_uthread);
 	if (has_refl_fault(&vcpd->uthread_ctx)) {
@@ -654,6 +678,14 @@ void __attribute__((noreturn)) run_current_uthread(void)
 		set_stack_pointer((void*)vcpd->vcore_stack);
 		vcore_entry();
 	}
+
+	// XXX
+	/* feel like we might merge a bit with run_uth */
+	if (current_uthread->flags & UTHREAD_FPSAVED) {
+		current_uthread->flags &= ~UTHREAD_FPSAVED;
+		restore_fp_state(&current_uthread->as);
+	}
+
 	/* Go ahead and start the uthread */
 	set_uthread_tls(current_uthread, vcoreid);
 	/* Run, using the TF in the VCPD.  FP state should already be loaded */
@@ -729,7 +761,15 @@ static void __run_current_uthread_raw(void)
 	 * to vcore context.  (note the kernel turned it off for us) */
 	vcpd->notif_pending = TRUE;
 	assert(!(current_uthread->flags & UTHREAD_SAVED));
-	assert(!(current_uthread->flags & UTHREAD_FPSAVED));
+
+	// XXX
+	//assert(!(current_uthread->flags & UTHREAD_FPSAVED));
+	/* feel like we might merge a bit with run_uth */
+	if (current_uthread->flags & UTHREAD_FPSAVED) {
+		current_uthread->flags &= ~UTHREAD_FPSAVED;
+		restore_fp_state(&current_uthread->as);
+	}
+
 	set_uthread_tls(current_uthread, vcoreid);
 	pop_user_ctx_raw(&vcpd->uthread_ctx, vcoreid);
 	assert(0);
@@ -760,6 +800,10 @@ static void copyout_uthread(struct preempt_data *vcpd, struct uthread *uthread,
 	assert(uthread);
 	if (uthread->flags & UTHREAD_SAVED) {
 		/* I don't know of scenarios where HW/VM ctxs FP state differs from GP*/
+		//	XXX maybe now!
+		//	this case was when we were about to run a uth, had it assigned at
+		//	least, but then handle_events made us change our mind.
+		//	the asserts are probably still true
 		switch (uthread->u_ctx.type) {
 		case ROS_HW_CTX:
 		case ROS_VM_CTX:
@@ -777,6 +821,16 @@ static void copyout_uthread(struct preempt_data *vcpd, struct uthread *uthread,
 		assert(!(uthread->flags & UTHREAD_FPSAVED));
 		return;
 	}
+
+
+// XXX we might have FPSAVED for non-SW ctx now, since the FP was saved in
+// vc_entry before we got to the event handler.
+	if (uthread->flags & UTHREAD_FPSAVED) {
+		assert(vcore_local);
+		return;
+	}
+	// XXX refactor below here
+
 	/* HW contexts also should not have it saved either.  Should be either in
 	 * the VCPD or the FPU.  Yes, this is the same assert. */
 	assert(!(uthread->flags & UTHREAD_FPSAVED));
