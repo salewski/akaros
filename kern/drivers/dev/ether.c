@@ -313,6 +313,22 @@ struct block *etheriq(struct ether *ether, struct block *bp, int fromwire)
 
 	ether->inpackets++;
 
+bool drop_from_guest = FALSE, drop_from_aka = FALSE;
+if (fromwire)
+	bp = linearizeblock(bp);
+
+if (BHLEN(bp) >= 38) {
+	uint8_t proto = *(uint8_t*)(bp->rp + 23);
+	uint16_t dport = nhgets(bp->rp + 36);
+
+	if (proto == 6) {
+		if (dport == 23)
+			drop_from_aka = TRUE;
+		else
+			drop_from_guest = TRUE;
+	}
+}
+
 	pkt = (struct etherpkt *)bp->rp;
 	/* TODO: we might need to assert more for higher layers, or otherwise deal
 	 * with extra data. */
@@ -364,6 +380,12 @@ struct block *etheriq(struct ether *ether, struct block *bp, int fromwire)
 	for (fp = ether->f; fp < ep; fp++) {
 		if ((f = *fp) && (f->type == type || f->type < 0))
 			if (tome || multi || f->prom) {
+
+				if ((f->type < 0) && drop_from_guest)
+					continue;
+				if ((f->type >= 0) && drop_from_aka)
+					continue;
+
 				/* Don't want to hear bridged packets */
 				if (f->bridge && !fromwire && !fromme)
 					continue;
