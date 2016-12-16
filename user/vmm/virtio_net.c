@@ -32,13 +32,14 @@
 #include <vmm/virtio.h>
 #include <vmm/virtio_mmio.h>
 #include <vmm/virtio_net.h>
+#include <vmm/nat.h>
 #include <parlib/iovec.h>
 
 #define VIRTIO_HEADER_SIZE	12
 
 static int ctlfd;
 static int etherfd;
-static char data_path[128];
+static char data_path[128];// XXX
 static char clone_path[64];
 
 void net_init_fn(struct virtio_vq_dev *vqdev, int nic)
@@ -52,6 +53,9 @@ void net_init_fn(struct virtio_vq_dev *vqdev, int nic)
 	int num_read;
 	int total_read = 0;
 
+	vmm_nat_init();
+
+// XXX prune what we don't need
 	snprintf(addr_path, sizeof(addr_path), "/net/ether%d/addr", nic);
 	addr_fd = open(addr_path, O_RDONLY);
 	if (addr_fd < 0)
@@ -97,12 +101,7 @@ void net_receiveq_fn(void *_vq)
 	int num_read;
 	struct iovec *iov;
 	struct virtio_mmio_dev *dev = vq->vqdev->transport_dev;
-	int fd;
 	struct virtio_net_hdr_v1 *net_header;
-
-	fd = open(data_path, O_RDWR);
-	if (fd == -1)
-		VIRTIO_DEV_ERRX(vq->vqdev, "Could not open data file for ether1.");
 
 	if (!vq)
 		VIRTIO_DEV_ERRX(vq->vqdev,
@@ -137,7 +136,7 @@ void net_receiveq_fn(void *_vq)
 		/* For receive the virtio header is in iov[0], so we only want
 		 * the packet to be read into iov[1] and above.
 		 */
-		num_read = readv(fd, iov + 1, ilen - 1);
+		num_read = receive_packet(iov + 1, ilen - 1);
 		if (num_read < 0) {
 			free(iov);
 			VIRTIO_DEV_ERRX(vq->vqdev,
@@ -171,10 +170,6 @@ void net_transmitq_fn(void *_vq)
 	struct iovec *iov;
 	struct virtio_mmio_dev *dev = vq->vqdev->transport_dev;
 	void *stripped;
-	int fd = open(data_path, O_RDWR);
-
-	if (fd == -1)
-		VIRTIO_DEV_ERRX(vq->vqdev, "Could not open data file for ether1.");
 
 	iov = malloc(vq->qnum_max * sizeof(struct iovec));
 	assert(iov != NULL);
@@ -198,7 +193,7 @@ void net_transmitq_fn(void *_vq)
 		/* Strip off the virtio header (the first 12 bytes), as it is
 		 * not a part of the actual ethernet frame. */
 		iov_strip_bytes(iov, olen, VIRTIO_HEADER_SIZE);
-		writev(fd, iov, olen);
+		transmit_packet(iov, olen);
 
 		virtio_add_used_desc(vq, head, 0);
 

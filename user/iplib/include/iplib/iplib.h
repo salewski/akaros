@@ -14,6 +14,10 @@ __BEGIN_DECLS
 
 enum 
 {
+	ETH_HDR_LEN = 14,
+	ETH_TYPE_IPV4 = 0x0800,
+	ETH_TYPE_ARP = 0x0806,
+	ETH_TYPE_IPV6 = 0x86dd,
 	IPaddrlen=	16,
 	IPv4addrlen=	4,
 	IPv4off=	12,
