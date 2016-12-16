@@ -109,6 +109,28 @@ int announce9(char *addr, char *dir, int flags)
 	return ctl;
 }
 
+/* Gets a conversation and bypasses the protocol layer */
+int bypass9(char *addr, char *dir, int flags)
+{
+	int ctl, n;
+	char buf[Maxpath];
+	char netdir[Maxpath];
+	char naddr[Maxpath];
+
+	if (nettrans(addr, naddr, sizeof(naddr), netdir, sizeof(netdir)) < 0)
+		return -1;
+	ctl = __clone9(netdir, dir, "bypass", flags);
+	if (ctl < 0)
+		return -1;
+	n = snprintf(buf, sizeof(buf), "bypass %s", naddr);
+	if (write(ctl, buf, n) != n) {
+		fprintf(stderr, "bypass writing %s: %r\n", netdir);
+		close(ctl);
+		return -1;
+	}
+	return ctl;
+}
+
 /*
  *  listen for an incoming call
  */
@@ -299,4 +321,12 @@ static int nettrans(char *addr, char *naddr, int na, char *file, int nf)
 	}
 	snprintf(file, nf, "%s/%s", netdir, p);
 	return 0;
+}
+
+int open_data_fd9(char *dir)
+{
+	char path_buf[Maxpath];
+
+	snprintf(path_buf, sizeof(path_buf), "%s/data", dir);
+	return open(path_buf, O_RDWR);
 }

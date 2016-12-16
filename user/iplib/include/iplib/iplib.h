@@ -227,8 +227,10 @@ char *netmkaddr(char *linear, char *defnet, char *defsrv);
 int dial9(char *dest, char *local, char *dir, int *cfdp, int flags);
 int clone9(char *addr, char *dir, int flags);
 int announce9(char *addr, char *dir, int flags);
+int bypass9(char *addr, char *dir, int flags);
 int listen9(char *dir, char *newdir, int flags);
 int accept9(int ctl, char *dir);
 int reject9(int ctl, char *dir, char *cause);
+int open_data_fd9(char *dir);
 
 __END_DECLS
